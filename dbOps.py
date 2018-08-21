@@ -1,27 +1,8 @@
 import  psycopg2
 
-conn = None
 
-def add_user(user_name,user_email):
-    try:
 
-        sql="""INSERT INTO users(user_name,_user_email) VALUES (%s,%s) RETURNING user_id"""
-        cur=conn.cursor()
 
-        cur.execute(sql,(user_name,user_email))
-
-        user_id= cur.fetchone()[0]
-
-        conn.commit()
-
-        cur.close()
-    except(Exception,psycopg2.DatabaseError) as error:
-        print (error)
-    finally:
-        if conn is not None:
-            conn.close()
-
-    return user_id
 
 def add_question(question,user_id):
     try:
@@ -137,13 +118,15 @@ def create_tables():
     commands = (
         """
         CREATE TABLE users (
-            user_id INTEGER PRIMARY KEY,
+            user_id SERIAL PRIMARY KEY,
             user_name VARCHAR(255) NOT NULL,
-            user_email VARCHAR(255) 
+            password VARCHAR(255) NOT NULL,
+            user_email VARCHAR(255),
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
         )
         """,
         """ CREATE TABLE questions (
-                question_id INTEGER PRIMARY KEY,
+                question_id SERIAL PRIMARY KEY,
                 question VARCHAR(255) NOT NULL,
                 user_id INTEGER NOT NULL,
                 deleted INTEGER,
@@ -154,7 +137,7 @@ def create_tables():
         """,
         """
         CREATE TABLE answers (
-                answer_id INTEGER PRIMARY KEY,
+                answer_id SERIAL PRIMARY KEY,
                 answer VARCHAR(255) NOT NULL,
                 question_id INTEGER NOT NULL,
                 preffered INTEGER,
@@ -163,7 +146,7 @@ def create_tables():
                 ON UPDATE CASCADE ON DELETE CASCADE
         )
         """)
-    conn = None
+
     try:
         # read the connection parameters
         # connect to the PostgreSQL server
