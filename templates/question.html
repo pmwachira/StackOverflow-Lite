@@ -1,5 +1,9 @@
 {% extends 'layouts.html' %}
 
 {% block body %}
-<h1>{{id}}</h1>
+<h1>{{question.title}}</h1>
+<small>Written by {{question.author}} on {{question.create_date}}</small>
+<div>
+    {{ question.body | safe }}
+</div>
 {% endblock %}
