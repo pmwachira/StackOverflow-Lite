@@ -1,23 +1,20 @@
-import  psycopg2
+import psycopg2
 
 
-
-
-
-def add_question(question,user_id):
+def add_question(question, user_id):
     try:
 
-        sql="""INSERT INTO questions(question,user_id) VALUES (%s,%s) RETURNING question_id"""
-        cur=conn.cursor()
+        sql = """INSERT INTO questions(question,user_id) VALUES (%s,%s) RETURNING question_id"""
+        cur = conn.cursor()
 
-        cur.execute(sql,(question,user_id))
+        cur.execute(sql, (question, user_id))
 
-        question_id= cur.fetchone()[0]
+        question_id = cur.fetchone()[0]
 
         conn.commit()
 
         cur.close()
-    except(Exception,psycopg2.DatabaseError) as error:
+    except(Exception, psycopg2.DatabaseError) as error:
         print (error)
     finally:
         if conn is not None:
@@ -25,20 +22,21 @@ def add_question(question,user_id):
 
     return question_id
 
-def add_answer(answer,question_id):
+
+def add_answer(answer, question_id):
     try:
 
-        sql="""INSERT INTO answers(answer,question_id) VALUES (%s,%s) RETURNING answer_id"""
-        cur=conn.cursor()
+        sql = """INSERT INTO answers(answer,question_id) VALUES (%s,%s) RETURNING answer_id"""
+        cur = conn.cursor()
 
-        cur.execute(sql,(answer,question_id))
+        cur.execute(sql, (answer, question_id))
 
-        answer_id= cur.fetchone()[0]
+        answer_id = cur.fetchone()[0]
 
         conn.commit()
 
         cur.close()
-    except(Exception,psycopg2.DatabaseError) as error:
+    except(Exception, psycopg2.DatabaseError) as error:
         print (error)
     finally:
         if conn is not None:
@@ -55,7 +53,7 @@ def get_all_questions():
 
         cur.execute(sql)
 
-        rows=cur.fetchall()
+        rows = cur.fetchall()
 
         print("The number of questions: ", cur.rowcount)
         for row in rows:
@@ -77,9 +75,9 @@ def delete_question(question_id):
         sql = """UPDATE questions SET deleted=%i WHERE question_id=%s"""
         cur = conn.cursor()
 
-        cur.execute(sql,(1,question_id))
+        cur.execute(sql, (1, question_id))
 
-        rows=cur.rowcount()
+        rows = cur.rowcount()
 
         conn.commit()
 
@@ -91,6 +89,7 @@ def delete_question(question_id):
             conn.close()
 
     return rows
+
 
 def preferred_answer(answer_id):
     try:
@@ -98,9 +97,9 @@ def preferred_answer(answer_id):
         sql = """UPDATE questions SET preffered=%i WHERE answer_id=%s"""
         cur = conn.cursor()
 
-        cur.execute(sql,(1,answer_id))
+        cur.execute(sql, (1, answer_id))
 
-        rows=cur.rowcount()
+        rows = cur.rowcount()
 
         conn.commit()
 
@@ -113,8 +112,8 @@ def preferred_answer(answer_id):
 
     return rows
 
-def create_tables():
 
+def create_tables():
     commands = (
         """
         CREATE TABLE users (
