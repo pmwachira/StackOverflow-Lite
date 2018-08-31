@@ -139,11 +139,22 @@ def create_tables():
                 answer_id SERIAL PRIMARY KEY,
                 answer VARCHAR(255) NOT NULL,
                 question_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
                 preffered INTEGER,
+                upvotes INTEGER,
+                downvotes INTEGER,
                 FOREIGN KEY (question_id)
                 REFERENCES questions (question_id)
                 ON UPDATE CASCADE ON DELETE CASCADE
         )
+        """,""" CREATE TABLE comments (
+        comment_id SERIAL PRIMARY KEY,
+        comment_ VARCHAR(255) NOT NULL,
+        comment_user VARCHAR(255) NOT NULL,
+        answer_id INTEGER NOT NULL,
+        FOREIGN KEY(answer_id) REFERENCES answers(answer_id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE)
         """)
 
     try:

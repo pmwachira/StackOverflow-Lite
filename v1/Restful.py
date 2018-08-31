@@ -2,14 +2,18 @@ from functools import wraps
 
 import psycopg2
 import psycopg2.extras
-from flask import Flask, render_template, flash, redirect, url_for, session, request
+from flask import Flask, render_template, flash, redirect, url_for, session, request, jsonify, make_response
 from passlib.hash import sha256_crypt
 from wtforms import Form, StringField, TextAreaField, PasswordField, validators
 
-app = Flask(__name__, template_folder="templates")
+import jwt
+import datetime
 
+app = Flask(__name__, template_folder="../static/templates")
 
-# app= connexion.App(__name__,specification_dir='./')
+app.config['JWT_SECRET_KEY'] = 'my very unsecured secret key'
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(days=1)
+
 
 
 @app.route('/')
@@ -17,9 +21,41 @@ def home():
     return render_template('home.html')
 
 
-# @app.route('/auth/signup')
+def token_required(f):
+    @wraps(f)
+    def _verify(*args, **kwargs):
+        auth_headers = request.headers.get('Authorization', '').split()
 
-@app.route('/login', methods=['GET', 'POST'])
+        invalid_msg = {
+            'message': 'Invalid token. Registeration and / or authentication required',
+            'authenticated': False
+        }
+        expired_msg = {
+            'message': 'Expired token. Reauthentication required.',
+            'authenticated': False
+        }
+
+        if len(auth_headers) != 2:
+            return jsonify(invalid_msg), 401
+
+        try:
+            token = auth_headers[1]
+            data = jwt.decode(token, app.config['SECRET_KEY'])
+            user = session['username']
+
+            if user != data['sub']:
+                raise RuntimeError('User not found')
+            return f(*args, **kwargs)
+        except jwt.ExpiredSignatureError:
+            return jsonify(expired_msg), 401 # 401 is Unauthorized HTTP status code
+        except (jwt.InvalidTokenError, Exception) as e:
+            print(e)
+            return jsonify(invalid_msg), 401
+
+    return _verify
+
+
+@app.route('/auth/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
 
@@ -30,18 +66,36 @@ def login():
         try:
 
             cur = conn.cursor()
-            cur.execute("SELECT password FROM users WHERE user_name = %s", [username])
+            cur.execute("SELECT user_id,password FROM users WHERE user_name = %s", [username])
 
             if cur.rowcount > 0:
-                cur.close()
+                user={
 
-                password = cur.fetchone()[0]
+                }
+
+                cur_values = cur.fetchone()
+
+                user_id=cur_values[0]
+                password=cur_values[1]
+
                 if sha256_crypt.verify(password_candidate, password):
+
                     session['logged_in'] = True
                     session['username'] = username
 
                     flash('Hi ' + username, 'success')
-                    return redirect(url_for('dashboard'))
+                    cur.close()
+                    # implement tokens
+                    token = jwt.encode({
+                        'sub': username,
+                        'iat': datetime.datetime.utcnow(),
+                        'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)},
+                        app.config['SECRET_KEY'])
+                    return jsonify({'token': token.decode('UTF-8')})
+
+
+                    ##return redirect(url_for('dashboard',token=token))
+
 
                 else:
 
@@ -63,22 +117,25 @@ def login():
     return render_template('login.html')
 
 
-# @app.route('/auth/login')
-
 def is_logged_in(f):
     @wraps(f)
     def wrap(*args, **kwargs):
+
         if 'logged_in' in session:
             return f(*args, **kwargs)
         else:
-            flash('Unauthorized, please login', 'danger')
+            flash('Unauthorized, Please login', 'danger')
             return redirect(url_for('login'))
 
     return wrap
 
 
+
+
+
 @app.route('/dashboard')
-@is_logged_in
+##@is_logged_in
+@token_required_
 def dashboard():
     conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -99,27 +156,29 @@ class ArticleForm(Form):
     title = StringField('Title', [validators.Length(min=1, max=200)])
     body = TextAreaField('Username', [validators.Length(min=30)])
 
-
-@app.route('/add_article', methods=['GET', 'POST'])
+@app.route('/questions',methods=['POST'])
 @is_logged_in
-def add_article():
+def add_question():
     form = ArticleForm(request.form)
     if request.method == 'POST' and form.validate():
-        title = form.title.data
-        body = form.body.data
+        question = form.question.data
+        ##todo get user id from session
+        ##session['username']
+        ##user_id=session['id']
+        user_id=1
         conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
 
         try:
 
             cur = conn.cursor()
-            cur.execute("INSERT INTO articles (title,body,author) VALUES (%s,%s,%s)",
-                        (title, body, session['username']))
+            cur.execute("INSERT INTO questions (question,user_id) VALUES (%s,%s)",
+                        (question,user_id ))
 
             conn.commit()
 
             cur.close()
 
-            flash('Article created', 'success')
+            flash('Question created', 'success')
 
             return redirect(url_for('dashboard'))
 
@@ -191,6 +250,47 @@ def delete_article(id):
     return redirect(url_for('dashboard'))
 
 
+@app.route('/questions/<string:questionId>/answers/<string:answerId>', methods=['GET', 'POST'])
+@is_logged_in
+def edit_answer(answerId):
+    ##todo get current session userid
+    session_user_id=1
+    ##get questionid
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT question_id FROM answers WHERE answer_id=%s",answerId)
+
+    question_id = cur.fetchone()
+    cur.close()
+    ##getquestion owner
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT user_id FROM questions WHERE question_id=%s", question_id)
+
+    user_id = cur.fetchone()
+    cur.close()
+    ##mark as answer as preffered
+    if session_user_id==user_id:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("UPDATE answers SET preffered=1 WHERE answer_id=%s", answerId)
+        conn.commit()
+        cur.close()
+        flash('Answer marked as prefferred', 'success')
+
+        return redirect(url_for('dashboard'))
+    else:
+        ##edit the answer
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("UPDATE answers SET answer=%s WHERE answer_id=%s", (answer,answerId))
+        conn.commit()
+        cur.close()
+
+        flash('Answer Edited', 'success')
+
+        return redirect(url_for('dashboard'))
+
+
+
+
 @app.route('/logout')
 @is_logged_in
 def logout():
@@ -200,12 +300,12 @@ def logout():
     return redirect(url_for('login'))
 
 
-@app.route('/questions')
+@app.route('/questions',methods=['GET'])
 def questions():
     conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
 
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT * FROM articles")
+    cur.execute("SELECT * FROM questions")
 
     articles = cur.fetchall()
 
@@ -219,12 +319,12 @@ def questions():
         return render_template('questions.html', msg=msg)
 
 
-@app.route('/question/<string:id>/')
+@app.route('/questions/<string:id>/')
 def question(id):
     conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
 
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT * FROM articles WHERE id=%s", [id])
+    cur.execute("SELECT * FROM questions WHERE id=%s", [id])
 
     question = cur.fetchone()
 
@@ -238,9 +338,33 @@ def question(id):
         return render_template('question.html', msg=msg)
 
 
-# @app.route('/questions')
-# @app.route('/questions/<questionId>')
-# @app.route('/questions/<questionId>/answers')
+@app.route('/questions/<string:questionId>/answers')
+def answer(questionId):
+    form = ArticleForm(request.form)
+    if request.method == 'POST' and form.validate():
+        answer = form.answer.data
+        ##todo get userid from session
+        user_id=1
+
+        conn = psycopg2.connect("host= localhost dbname=StackOverflowLite user=postgres password=postgres")
+        try:
+
+            sql = """INSERT INTO answer(answer,question_id,user_id) VALUES (%s,%s,%s) RETURNING answer_id"""
+            cur = conn.cursor()
+
+            cur.execute(sql, (answer, questionId,user_id    ))
+
+            answer_id = cur.fetchone()[0]
+
+            conn.commit()
+
+            cur.close()
+
+        except(Exception, psycopg2.DatabaseError) as error:
+            print (error)
+        finally:
+            if conn is not None:
+                conn.close()
 # @app.route('/questions/<questionId>/answers/<answerId>')
 
 class RegisterForm(Form):
@@ -253,8 +377,7 @@ class RegisterForm(Form):
     ])
     confirm = PasswordField('Confirm Password')
 
-
-@app.route('/register', methods=['GET', 'POST'])
+@app.route('/auth/signup', methods=['GET', 'POST'])
 def register():
     form = RegisterForm(request.form)
     if request.method == 'POST' and form.validate():
@@ -264,7 +387,7 @@ def register():
         password = sha256_crypt.encrypt(str(form.password.data))
 
         show = add_user(name, email, username, password)
-        flash('You are now registered' + str(show), 'success')
+        flash('Login using username: ' + str(show)+" and your password", 'success')
         return redirect(url_for('login'))
 
     return render_template('register.html', form=form)
@@ -291,7 +414,7 @@ def add_user(name, email, username, password):
         if conn is not None:
             conn.close()
 
-    return user_id
+    return name
 
 
 if __name__ == '__main__':
