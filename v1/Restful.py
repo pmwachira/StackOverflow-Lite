@@ -14,13 +14,6 @@ app = Flask(__name__, template_folder="../static/templates")
 app.config['JWT_SECRET_KEY'] = 'my very unsecured secret key'
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(days=1)
 
-
-
-@app.route('/')
-def home():
-    return render_template('home.html')
-
-
 def token_required(f):
     @wraps(f)
     def _verify(*args, **kwargs):
@@ -54,7 +47,23 @@ def token_required(f):
 
     return _verify
 
+def is_logged_in(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
 
+        if 'logged_in' in session:
+            return f(*args, **kwargs)
+        else:
+            flash('Unauthorized, Please login', 'danger')
+            return redirect(url_for('login'))
+
+    return wrap
+
+@app.route('/')
+def home():
+    return render_template('home.html')
+
+##route 1
 @app.route('/auth/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -69,9 +78,6 @@ def login():
             cur.execute("SELECT user_id,password FROM users WHERE user_name = %s", [username])
 
             if cur.rowcount > 0:
-                user={
-
-                }
 
                 cur_values = cur.fetchone()
 
@@ -82,6 +88,7 @@ def login():
 
                     session['logged_in'] = True
                     session['username'] = username
+                    session['user_id']=user_id
 
                     flash('Hi ' + username, 'success')
                     cur.close()
@@ -91,21 +98,24 @@ def login():
                         'iat': datetime.datetime.utcnow(),
                         'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)},
                         app.config['SECRET_KEY'])
-                    return jsonify({'token': token.decode('UTF-8')})
+                    return jsonify({'token': token.decode('UTF-8'),'message':'Log in success'})
 
-
+                    ##redirect url
                     ##return redirect(url_for('dashboard',token=token))
 
 
                 else:
-
-                    error = 'Invalid login'
-                    return render_template('login.html', error=error)
+                    ##redirect url
+                    ##error = 'Invalid login'
+                    ##return render_template('login.html', error=error)
+                    return jsonify({ 'message': 'Log in failed'})
             else:
                 cur.close()
 
-                error = 'User not found'
-                return render_template('login.html', error=error)
+                ##error = 'User not found'
+                ##return render_template('login.html', error=error)
+
+                return jsonify({'message': 'Log in failed<User not found>'})
 
         except(Exception, psycopg2.DatabaseError) as error:
             print (error)
@@ -114,259 +124,10 @@ def login():
             if conn is not None:
                 conn.close()
 
-    return render_template('login.html')
+    ##return render_template('login.html')
+    return
 
-
-def is_logged_in(f):
-    @wraps(f)
-    def wrap(*args, **kwargs):
-
-        if 'logged_in' in session:
-            return f(*args, **kwargs)
-        else:
-            flash('Unauthorized, Please login', 'danger')
-            return redirect(url_for('login'))
-
-    return wrap
-
-
-
-
-
-@app.route('/dashboard')
-##@is_logged_in
-@token_required_
-def dashboard():
-    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT * FROM articles")
-
-    articles = cur.fetchall()
-    cur.close()
-    if cur.rowcount > 0:
-
-        return render_template('dashboard.html', articles=articles)
-
-    else:
-        msg = 'No articles found'
-        return render_template('dashboard.html', msg=msg)
-
-
-class ArticleForm(Form):
-    title = StringField('Title', [validators.Length(min=1, max=200)])
-    body = TextAreaField('Username', [validators.Length(min=30)])
-
-@app.route('/questions',methods=['POST'])
-@is_logged_in
-def add_question():
-    form = ArticleForm(request.form)
-    if request.method == 'POST' and form.validate():
-        question = form.question.data
-        ##todo get user id from session
-        ##session['username']
-        ##user_id=session['id']
-        user_id=1
-        conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
-
-        try:
-
-            cur = conn.cursor()
-            cur.execute("INSERT INTO questions (question,user_id) VALUES (%s,%s)",
-                        (question,user_id ))
-
-            conn.commit()
-
-            cur.close()
-
-            flash('Question created', 'success')
-
-            return redirect(url_for('dashboard'))
-
-        except(Exception, psycopg2.DatabaseError) as error:
-            print (error)
-
-        finally:
-            if conn is not None:
-                conn.close()
-
-    return render_template('add_article.html', form=form)
-
-
-@app.route('/edit_article/<string:id>', methods=['GET', 'POST'])
-@is_logged_in
-def edit_article(id):
-    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT * FROM articles WHERE id=%s", id)
-
-    article = cur.fetchone()
-
-    cur.close()
-    form = ArticleForm(request.form)
-
-    form.title.data = article['title']
-    form.body.data = article['body']
-    if request.method == 'POST' and form.validate():
-        title = request.form['title']
-        body = request.form['body']
-
-        try:
-
-            cur = conn.cursor()
-            cur.execute("UPDATE articles SET title = %s, body= %s WHERE id=%s", (title, body, id))
-
-            conn.commit()
-
-            cur.close()
-
-            flash('Article updated', 'success')
-
-            return redirect(url_for('dashboard'))
-
-        except(Exception, psycopg2.DatabaseError) as error:
-            print (error)
-
-        finally:
-            if conn is not None:
-                conn.close()
-
-    return render_template('edit_article.html', form=form)
-
-
-@app.route('/delete_article/<string:id>', methods=['GET', 'POST'])
-@is_logged_in
-def delete_article(id):
-    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-    cur.execute("UPDATE articles SET deleted = 1 WHERE id=%s", id)
-
-    conn.commit()
-
-    cur.close()
-
-    flash('Article deleted', 'success')
-
-    return redirect(url_for('dashboard'))
-
-
-@app.route('/questions/<string:questionId>/answers/<string:answerId>', methods=['GET', 'POST'])
-@is_logged_in
-def edit_answer(answerId):
-    ##todo get current session userid
-    session_user_id=1
-    ##get questionid
-    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT question_id FROM answers WHERE answer_id=%s",answerId)
-
-    question_id = cur.fetchone()
-    cur.close()
-    ##getquestion owner
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT user_id FROM questions WHERE question_id=%s", question_id)
-
-    user_id = cur.fetchone()
-    cur.close()
-    ##mark as answer as preffered
-    if session_user_id==user_id:
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("UPDATE answers SET preffered=1 WHERE answer_id=%s", answerId)
-        conn.commit()
-        cur.close()
-        flash('Answer marked as prefferred', 'success')
-
-        return redirect(url_for('dashboard'))
-    else:
-        ##edit the answer
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("UPDATE answers SET answer=%s WHERE answer_id=%s", (answer,answerId))
-        conn.commit()
-        cur.close()
-
-        flash('Answer Edited', 'success')
-
-        return redirect(url_for('dashboard'))
-
-
-
-
-@app.route('/logout')
-@is_logged_in
-def logout():
-    name = session['username']
-    session.clear()
-    flash('You have logged out, see you soon ' + name, 'success')
-    return redirect(url_for('login'))
-
-
-@app.route('/questions',methods=['GET'])
-def questions():
-    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
-
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT * FROM questions")
-
-    articles = cur.fetchall()
-
-    if cur.rowcount > 0:
-        cur.close()
-        return render_template('questions.html', questions=articles)
-
-    else:
-        cur.close()
-        msg = 'No articles found'
-        return render_template('questions.html', msg=msg)
-
-
-@app.route('/questions/<string:id>/')
-def question(id):
-    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
-
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cur.execute("SELECT * FROM questions WHERE id=%s", [id])
-
-    question = cur.fetchone()
-
-    if cur.rowcount > 0:
-        cur.close()
-        return render_template('question.html', question=question)
-
-    else:
-        cur.close()
-        msg = 'No articles matching found'
-        return render_template('question.html', msg=msg)
-
-
-@app.route('/questions/<string:questionId>/answers')
-def answer(questionId):
-    form = ArticleForm(request.form)
-    if request.method == 'POST' and form.validate():
-        answer = form.answer.data
-        ##todo get userid from session
-        user_id=1
-
-        conn = psycopg2.connect("host= localhost dbname=StackOverflowLite user=postgres password=postgres")
-        try:
-
-            sql = """INSERT INTO answer(answer,question_id,user_id) VALUES (%s,%s,%s) RETURNING answer_id"""
-            cur = conn.cursor()
-
-            cur.execute(sql, (answer, questionId,user_id    ))
-
-            answer_id = cur.fetchone()[0]
-
-            conn.commit()
-
-            cur.close()
-
-        except(Exception, psycopg2.DatabaseError) as error:
-            print (error)
-        finally:
-            if conn is not None:
-                conn.close()
-# @app.route('/questions/<questionId>/answers/<answerId>')
-
+##route 2
 class RegisterForm(Form):
     name = StringField('Name', [validators.Length(min=1, max=50)])
     username = StringField('Username', [validators.Length(min=4, max=25)])
@@ -380,17 +141,35 @@ class RegisterForm(Form):
 @app.route('/auth/signup', methods=['GET', 'POST'])
 def register():
     form = RegisterForm(request.form)
-    if request.method == 'POST' and form.validate():
-        name = form.name.data
-        email = form.email.data
-        username = form.username.data
-        password = sha256_crypt.encrypt(str(form.password.data))
+    ##if request.method == 'POST' and form.validate():
+    if request.method == 'POST':
+        ##from form
+        # name = form.name.data
+        # email = form.email.data
+        #password_recieved=form.password.data
+        #username = form.username.data
+        ##from request
+        name=request.form['name']
+        email=request.form['email']
+        username = request.form['username']
+        password_recieved=request.form['password']
 
-        show = add_user(name, email, username, password)
-        flash('Login using username: ' + str(show)+" and your password", 'success')
-        return redirect(url_for('login'))
+        password = sha256_crypt.encrypt(str(password_recieved))
 
-    return render_template('register.html', form=form)
+        check = checkifemailexists(email)
+
+        if not check:
+            return jsonify({'message': 'Sign up fail,User with given email exists'})
+
+        else:
+            show = add_user(name, email, username, password)
+
+            return jsonify({'message': 'Sign up success,Please log in with your credentials'})
+
+        #flash('Login using username: ' + str(show)+" and your password", 'success')
+        #return redirect(url_for('login'))
+
+    #return render_template('register.html', form=form)
 
 
 def add_user(name, email, username, password):
@@ -415,6 +194,453 @@ def add_user(name, email, username, password):
             conn.close()
 
     return name
+
+def checkifemailexists(email):
+    conn = psycopg2.connect("host= localhost dbname=StackOverflowLite user=postgres password=postgres")
+    try:
+
+        sql = """SELECT * FROM users WHERE user_email=%s"""
+        cur = conn.cursor()
+
+        cur.execute(sql, (email))
+
+        if cur.rowcount > 0:
+            return True
+
+        cur.close()
+        return False
+
+    except(Exception, psycopg2.DatabaseError) as error:
+        print (error)
+    finally:
+        if conn is not None:
+            conn.close()
+
+##route 3
+@app.route('/questions',methods=['POST'])
+def add_question():
+    form = ArticleForm(request.form)
+    # if request.method == 'POST' and form.validate():
+    #     question = form.question.data
+
+    if request.method == 'POST':
+        question = request.form['question']
+
+        ##todo get user id from session
+        #user_id=session['user_id']
+        user_id=1
+
+        conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+
+        try:
+
+            cur = conn.cursor()
+            cur.execute("INSERT INTO questions (question,user_id) VALUES (%s,%s)",
+                        (question,user_id ))
+
+            conn.commit()
+
+            cur.close()
+
+            ##flash('Question created', 'success')
+
+            ##return redirect(url_for('dashboard'))
+            return jsonify({'message': 'Question created'})
+
+        except(Exception, psycopg2.DatabaseError) as error:
+            print (error)
+
+        finally:
+            if conn is not None:
+                conn.close()
+
+    ##return render_template('add_article.html', form=form)
+
+
+##route 4
+@app.route('/questions',methods=['GET'])
+def questions():
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cur.execute("SELECT * FROM questions")
+
+
+
+    questions = cur.fetchall()
+
+
+    if cur.rowcount > 0:
+        cur.close()
+        return jsonify({'Questions asked': questions})
+        #return render_template('questions.html', questions=questions)
+
+    else:
+        cur.close()
+        #msg = 'No questions found'
+        #return render_template('questions.html', msg=msg)
+        return jsonify({'message': 'No questions asked yet'})
+
+##route 5
+@app.route('/questions/<string:questionId>', methods=['DELETE'])
+def delete_question(questionId):
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        cur.execute("SELECT user_id FROM questions  WHERE question_id=%s", questionId)
+        question_owner = cur.fetchone()[0]
+        cur.close()
+        user_id = 1
+        #user_id=session['user_id']
+        if user_id==question_owner:
+
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+            cur.execute("DELETE FROM questions  WHERE question_id=%s", questionId)
+
+            conn.commit()
+            cur.close()
+            return jsonify({'message': 'Selected question deleted'})
+
+        # flash('Article deleted', 'success')
+
+        # return redirect(url_for('dashboard'))
+
+        else:
+            return jsonify({'message': 'Only question owner can perform this action'})
+    except(Exception, psycopg2.DatabaseError) as error:
+        return jsonify({'message': 'Selected question not found'})
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+#route 6
+@app.route('/questions/<string:questionId>/answers',methods=['POST'])
+def answer(questionId):
+    # form = ArticleForm(request.form)
+    # if request.method == 'POST' and form.validate():
+    #     answer = form.answer.data
+    if request.method == 'POST':
+        answer = request.form['answer']
+
+        ##todo get userid from session
+        user_id=1
+        # user_id=session['user_id']
+
+        conn = psycopg2.connect("host= localhost dbname=StackOverflowLite user=postgres password=postgres")
+        try:
+
+            sql = """INSERT INTO answers(answer,question_id,user_id) VALUES (%s,%s,%s)"""
+            cur = conn.cursor()
+
+            cur.execute(sql, (answer, questionId,user_id))
+
+            conn.commit()
+
+            cur.close()
+            ##add count in questions table
+            ##get current answers
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute("SELECT answer_count FROM questions WHERE question_id=%s", questionId)
+
+            answered_times = cur.fetchone()[0]
+            cur.close()
+            ##add answer count
+            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cur.execute("UPDATE questions SET answer_count=%s WHERE question_id=%s", ((answered_times + 1), questionId))
+            conn.commit()
+            cur.close()
+            return jsonify({'message': 'Your answer has been posted'})
+
+        except(Exception, psycopg2.DatabaseError) as error:
+            return jsonify({'error': error})
+        finally:
+            if conn is not None:
+                conn.close()
+
+#route 7
+##error in route
+#@app.route('/questions/<string:questionId>/answers/<string:answerId>', methods=['PUT'])
+@app.route('/questions/answers/<string:answerId>', methods=['PUT'])
+def edit_answer(answerId):
+    ##todo get current session userid
+    #session_user_id=session['user_id']
+    session_user_id=1
+    ##get questionid
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT question_id FROM answers WHERE answer_id=%s",answerId)
+
+    question_id = cur.fetchone()
+    cur.close()
+    ##getquestion owner
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT user_id FROM questions WHERE question_id=%s", question_id)
+
+    user_id = cur.fetchone()[0]
+    cur.close()
+    ##mark as answer as preffered
+    if session_user_id==user_id:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("UPDATE answers SET preffered=1 WHERE answer_id=%s", answerId)
+        conn.commit()
+        cur.close()
+        #flash('Answer marked as prefferred', 'success')
+        return jsonify({'message': 'Answer marked as preferred'})
+
+        return redirect(url_for('dashboard'))
+    else:
+        ##edit the answer
+        answer_new = request.form['answer_new']
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("UPDATE answers SET answer=%s WHERE answer_id=%s", (answer_new,answerId))
+        conn.commit()
+        cur.close()
+
+        return jsonify({'message': 'Answer successfully edited'})
+
+        #flash('Answer Edited', 'success')
+
+        #return redirect(url_for('dashboard'))
+
+
+#route 8
+@app.route('/questions/answers/<string:answerId>/upvote', methods=['PUT'])
+def upvote_answer(answerId):
+    ##todo get current session userid
+    #session_user_id=session['user_id']
+    session_user_id=2
+    ##get questionid
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT user_id FROM answers WHERE answer_id=%s",answerId)
+
+    answer_owner = cur.fetchone()[0]
+    cur.close()
+
+    ##owner can not upvote own answer
+    if session_user_id==answer_owner:
+        return jsonify({'message': 'Owner of answer can not upvote own answer'})
+    else:
+        ##get current upvotes
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT upvoted FROM answers WHERE answer_id=%s", answerId)
+
+        upvoted_times = cur.fetchone()[0]
+        cur.close()
+        ##add upvotes
+        if upvoted_times==None:
+            upvoted_times=0
+
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("UPDATE answers SET upvoted=%s WHERE answer_id=%s", ((upvoted_times+1),answerId))
+        conn.commit()
+        cur.close()
+
+
+
+        return jsonify({'message': 'Answer upvoted'})
+
+        #flash('Answer Edited', 'success')
+
+        #return redirect(url_for('dashboard'))
+
+#route 9
+@app.route('/questions/answers/<string:answerId>/downvote', methods=['PUT'])
+def downvote_answer(answerId):
+    ##todo get current session userid
+    #session_user_id=session['user_id']
+    session_user_id=2
+    ##get questionid
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT user_id FROM answers WHERE answer_id=%s",answerId)
+
+    answer_owner = cur.fetchone()[0]
+    cur.close()
+
+    ##owner can not upvote own answer
+    if session_user_id==answer_owner:
+        return jsonify({'message': 'Owner of answer can not upvote own answer'})
+    else:
+        ##get current upvotes
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("SELECT upvoted FROM answers WHERE answer_id=%s", answerId)
+
+        upvoted_times = cur.fetchone()[0]
+        cur.close()
+        ##add upvotes
+        if upvoted_times==None:
+            upvoted_times=0
+
+
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute("UPDATE answers SET upvoted=%s WHERE answer_id=%s", ((upvoted_times-1),answerId))
+        conn.commit()
+        cur.close()
+
+
+
+        return jsonify({'message': 'Answer downvoted'})
+
+#route 10
+@app.route('/answers/<string:answerId>/comments',methods=['POST'])
+def add_comment(answerId):
+    # form = ArticleForm(request.form)
+    # if request.method == 'POST' and form.validate():
+    #     answer = form.answer.data
+    if request.method == 'POST':
+        comment = request.form['comment']
+
+        ##todo get userid from session
+        user_id=1
+        # user_id=session['user_id']
+
+        conn = psycopg2.connect("host= localhost dbname=StackOverflowLite user=postgres password=postgres")
+        try:
+
+            sql = """INSERT INTO comments(comment_,answer_id,comment_user) VALUES (%s,%s,%s)"""
+            cur = conn.cursor()
+
+            cur.execute(sql, (comment, answerId,user_id))
+
+            conn.commit()
+
+            cur.close()
+            return jsonify({'message': 'Your comment has been posted'})
+
+        except(Exception, psycopg2.DatabaseError) as error:
+            return jsonify({'error': error})
+        finally:
+            if conn is not None:
+                conn.close()
+
+##route 11
+@app.route('/user/<string:userId>/questions',methods=['GET'])
+def questions_by_user(userId):
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cur.execute("SELECT * FROM questions WHERE user_id=%s",userId)
+
+    questions = cur.fetchall()
+
+
+    if cur.rowcount > 0:
+        cur.close()
+        return jsonify({'Questions asked by user': questions})
+        #return render_template('questions.html', questions=questions)
+
+    else:
+        cur.close()
+        #msg = 'No questions found'
+        #return render_template('questions.html', msg=msg)
+        return jsonify({'message': 'No questions asked by user yet'})
+
+##route 12
+@app.route('/questions_most_answered',methods=['GET'])
+def questions_most_answered():
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cur.execute("SELECT * FROM questions ORDER BY answer_count DESC LIMIT 5")
+
+    questions = cur.fetchall()
+
+
+    if cur.rowcount > 0:
+        cur.close()
+        return jsonify({'Most answered questions': questions})
+        #return render_template('questions.html', questions=questions)
+
+    else:
+        cur.close()
+        #msg = 'No questions found'
+        #return render_template('questions.html', msg=msg)
+        return jsonify({'message': 'No questions'})
+
+##route 13
+@app.route('/questions/search/',methods=['POST'])
+def search_questions():
+    search_text = request.form['search_text']
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cur.execute("SELECT * FROM questions WHERE question LIKE %s",[search_text])
+
+    questions = cur.fetchall()
+
+
+    if cur.rowcount > 0:
+        cur.close()
+        return jsonify({'Questions asked by user': questions})
+        #return render_template('questions.html', questions=questions)
+
+    else:
+        cur.close()
+        #msg = 'No questions found'
+        #return render_template('questions.html', msg=msg)
+        return jsonify({'message': 'No questions asked matching'})
+
+
+@app.route('/dashboard')
+##@is_logged_in
+@token_required
+def dashboard():
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT * FROM articles")
+
+    articles = cur.fetchall()
+    cur.close()
+    if cur.rowcount > 0:
+
+        return render_template('dashboard.html', articles=articles)
+
+    else:
+        msg = 'No articles found'
+        return render_template('dashboard.html', msg=msg)
+
+
+class ArticleForm(Form):
+    title = StringField('Title', [validators.Length(min=1, max=200)])
+    body = TextAreaField('Username', [validators.Length(min=30)])
+
+
+
+
+@app.route('/logout')
+@is_logged_in
+def logout():
+    name = session['username']
+    session.clear()
+    flash('You have logged out, see you soon ' + name, 'success')
+    return redirect(url_for('login'))
+
+
+
+@app.route('/questions/<string:id>/')
+def question(id):
+    conn = psycopg2.connect("host=localhost dbname=StackOverflowLite user=postgres password=postgres")
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT * FROM questions WHERE id=%s", [id])
+
+    question = cur.fetchone()
+
+    if cur.rowcount > 0:
+        cur.close()
+        return render_template('question.html', question=question)
+
+    else:
+        cur.close()
+        msg = 'No articles matching found'
+        return render_template('question.html', msg=msg)
 
 
 if __name__ == '__main__':

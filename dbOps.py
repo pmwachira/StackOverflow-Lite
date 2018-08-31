@@ -129,6 +129,7 @@ def create_tables():
                 question VARCHAR(255) NOT NULL,
                 user_id INTEGER NOT NULL,
                 deleted INTEGER,
+                answer_count INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (user_id)
                 REFERENCES users (user_id)
                 ON UPDATE CASCADE ON DELETE CASCADE
@@ -141,8 +142,7 @@ def create_tables():
                 question_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
                 preffered INTEGER,
-                upvotes INTEGER,
-                downvotes INTEGER,
+                upvoted INTEGER,
                 FOREIGN KEY (question_id)
                 REFERENCES questions (question_id)
                 ON UPDATE CASCADE ON DELETE CASCADE
